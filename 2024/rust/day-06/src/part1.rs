@@ -1,7 +1,5 @@
 use std::{cmp::max, collections::HashSet};
 
-use miette::miette;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum Dir {
     Up,
