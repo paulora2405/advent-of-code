@@ -6,7 +6,6 @@ use std::collections::{HashMap, HashSet};
 pub fn process(input: &str) -> miette::Result<String> {
     let n = input.lines().count() as i32;
     let m = input.lines().next().unwrap().len() as i32;
-    dbg!(n, m);
     let antennas = parse_input(input);
     let mut antinodes = HashSet::<_>::new();
 
