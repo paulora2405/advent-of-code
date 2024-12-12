@@ -12,9 +12,10 @@ pub fn process(input: &str) -> miette::Result<String> {
         .map(|dig| Stone(dig.parse().unwrap()))
         .collect::<Vec<_>>();
 
+    let mut cache = HashMap::<_, _>::new();
     Ok(stones
         .iter_mut()
-        .map(|s| s.stones_after_blinking_n_times(N_BLINKS, &mut HashMap::<_, _>::new()))
+        .map(|s| s.stones_after_blinking_n_times(N_BLINKS, &mut cache))
         .sum::<usize>()
         .to_string())
 }
