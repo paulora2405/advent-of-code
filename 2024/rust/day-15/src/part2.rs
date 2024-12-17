@@ -1,159 +1,197 @@
 use glam::IVec2;
 use itertools::Itertools;
-use std::{collections::HashSet, fmt::Display};
+use ndarray::Array2;
+use std::mem::swap;
 
-#[derive(Debug, Default)]
-struct Grid {
-    robot: IVec2,
-    boxes: HashSet<IVec2>,
-    walls: HashSet<IVec2>,
-    size: IVec2,
-}
-
-#[derive(Debug)]
-enum Move {
-    Up,
-    Right,
-    Down,
-    Left,
-}
+const UP: IVec2 = IVec2::new(0, -1);
+const DOWN: IVec2 = IVec2::new(0, 1);
+const LEFT: IVec2 = IVec2::new(-1, 0);
+const RIGHT: IVec2 = IVec2::new(1, 0);
 
 #[tracing::instrument]
 pub fn process(input: &str) -> miette::Result<String> {
     let (mut grid, moves) = parse_input(input);
+    let mut position = grid
+        .indexed_iter()
+        .find(|(_, &c)| c == '@')
+        .map(|((y, x), _)| IVec2::new(x as i32, y as i32))
+        .unwrap();
+
+    grid[position.to_index()] = '.';
 
     for m in &moves {
-        grid.try_moving_to(&(grid.robot + m.dx()), m, false);
+        match *m {
+            UP | DOWN => {
+                try_moving_vertically(&mut grid, &mut position, m);
+            }
+            LEFT | RIGHT => {
+                try_moving_horizontally(&mut grid, &mut position, m);
+            }
+            _ => unreachable!(),
+        }
     }
 
-    Ok(grid.get_gps_sum().to_string())
+    println!("{}", grid_to_string(&grid));
+
+    Ok(get_gps_sum(&grid).to_string())
 }
 
-impl Grid {
-    fn get_gps_sum(&self) -> i32 {
-        self.boxes.iter().map(|b| b.x + b.y * 100).sum()
-    }
-
-    fn try_moving_to(&mut self, new_pos: &IVec2, movement: &Move, is_moving_box: bool) -> bool {
-        // TODO: actually solve part 2
-        // no need to bound check because borders always have walls
-        if self.walls.contains(new_pos) {
-            return false;
-        }
-        if self.boxes.contains(new_pos) {
-            let should_move = self.try_moving_to(&(new_pos + movement.dx()), movement, true);
-            if should_move {
-                if is_moving_box {
-                    self.boxes.remove(&(new_pos - movement.dx()));
-                    self.boxes.insert(*new_pos);
-                } else {
-                    self.robot = *new_pos;
-                }
-            }
-            should_move
-        } else {
-            if is_moving_box {
-                self.boxes.remove(&(new_pos - movement.dx()));
-                self.boxes.insert(*new_pos);
+fn get_gps_sum(grid: &Array2<char>) -> usize {
+    grid.indexed_iter()
+        .filter_map(|((row, col), &c)| {
+            if c == '[' {
+                Some(row * 100 + col)
             } else {
-                self.robot = *new_pos;
+                None
             }
-            true
+        })
+        .sum()
+}
+
+fn try_moving_horizontally(grid: &mut Array2<char>, start_pos: &mut IVec2, movement: &IVec2) {
+    let mut position = *start_pos + movement;
+    let mut size = 1;
+
+    while grid[position.to_index()] != '.' && grid[position.to_index()] != '#' {
+        position += movement;
+        size += 1;
+    }
+
+    if grid[position.to_index()] == '.' {
+        let mut previous = '.';
+        let mut position = *start_pos + movement;
+
+        for _ in 0..size {
+            swap(&mut previous, &mut grid[position.to_index()]);
+            position += movement;
         }
+
+        *start_pos += movement;
     }
 }
 
-impl Move {
-    fn dx(&self) -> IVec2 {
-        match self {
-            Move::Up => IVec2::new(0, -1),
-            Move::Right => IVec2::new(1, 0),
-            Move::Down => IVec2::new(0, 1),
-            Move::Left => IVec2::new(-1, 0),
+fn try_moving_vertically(grid: &mut Array2<char>, start_pos: &mut IVec2, movement: &IVec2) {
+    if grid[(*start_pos + movement).to_index()] == '.' {
+        *start_pos += movement;
+        return;
+    }
+
+    let mut todo = Vec::with_capacity(50);
+    todo.push(IVec2::ZERO);
+    todo.push(*start_pos);
+    let mut index = 1;
+
+    while index < todo.len() {
+        let next = todo[index] + movement;
+        index += 1;
+
+        let (first, second) = match grid[next.to_index()] {
+            '[' => (next, next + RIGHT),
+            ']' => (next + LEFT, next),
+            '#' => return,
+            _ => continue,
+        };
+
+        if first != todo[todo.len() - 2] {
+            todo.push(first);
+            todo.push(second);
         }
+    }
+
+    for &pos in todo[2..].iter().rev() {
+        grid[(pos + movement).to_index()] = grid[pos.to_index()];
+        grid[pos.to_index()] = '.';
+    }
+
+    *start_pos += movement;
+}
+
+trait ToIndex {
+    fn to_index(&self) -> (usize, usize);
+}
+
+impl ToIndex for IVec2 {
+    fn to_index(&self) -> (usize, usize) {
+        (self.y as usize, self.x as usize)
     }
 }
 
-impl Display for Grid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut text = String::with_capacity(((self.size.x + 1) * self.size.y) as usize);
-
-        for y in 0..self.size.y {
-            for x in 0..self.size.x {
-                let c;
-                let pos = IVec2::new(x, y);
-                if self.robot == pos {
-                    c = '@';
-                } else if self.boxes.contains(&pos) {
-                    c = 'O';
-                } else if self.walls.contains(&pos) {
-                    c = '#';
-                } else {
-                    c = '.';
-                }
-                text += &c.to_string();
+fn grid_to_string(grid: &Array2<char>) -> String {
+    grid.indexed_iter()
+        .map(|(pos, &c)| {
+            if pos.1 == 0 {
+                "\n".to_string() + c.to_string().as_str()
+            } else {
+                c.to_string()
             }
-            text += "\n"
-        }
-
-        write!(f, "{text}")
-    }
+        })
+        .collect()
 }
 
-impl Display for Move {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Move::Up => write!(f, "^"),
-            Move::Right => write!(f, ">"),
-            Move::Down => write!(f, "v"),
-            Move::Left => write!(f, "<"),
-        }
-    }
-}
-
-fn parse_input(input: &str) -> (Grid, Vec<Move>) {
+fn parse_input(input: &str) -> (Array2<char>, Vec<IVec2>) {
     let (grid_str, moves) = input.split_once("\n\n").unwrap();
     let moves = moves
         .lines()
         .flat_map(|l| {
             l.chars().map(|c| match c {
-                '^' => Move::Up,
-                '>' => Move::Right,
-                'v' => Move::Down,
-                '<' => Move::Left,
+                '^' => UP,
+                '>' => RIGHT,
+                'v' => DOWN,
+                '<' => LEFT,
                 _ => unreachable!(),
             })
         })
         .collect_vec();
 
-    let mut grid = Grid {
-        size: IVec2::new(
-            grid_str.lines().count() as i32,
-            grid_str.lines().next().unwrap().chars().count() as i32,
-        ),
-        ..Default::default()
-    };
+    let size = [
+        grid_str.lines().count(),
+        grid_str.lines().next().unwrap().chars().count(),
+    ];
 
-    grid_str.lines().enumerate().for_each(|(y, line)| {
-        line.chars().enumerate().for_each(|(x, c)| match c {
-            '@' => grid.robot = IVec2::new(x as i32, y as i32),
-            'O' => {
-                let _ = grid.boxes.insert(IVec2::new(x as i32, y as i32));
-            }
-            '#' => {
-                let _ = grid.walls.insert(IVec2::new(x as i32, y as i32));
-            }
-            '.' => (),
-            _ => unreachable!(),
-        });
-    });
+    let normal_grid = grid_str
+        .lines()
+        .flat_map(|line| line.chars().collect_vec())
+        .collect_vec();
+    let normal_grid = Array2::from_shape_vec(size, normal_grid).unwrap();
 
-    (grid, moves)
+    println!("{}", grid_to_string(&normal_grid));
+
+    let mut stretched_grid = Array2::from_elem([size[0], size[1] * 2], '.');
+
+    for ((row, col), c) in normal_grid.indexed_iter() {
+        let (left, right) = match c {
+            '#' => ('#', '#'),
+            'O' => ('[', ']'),
+            '@' => ('@', '.'),
+            _ => continue,
+        };
+        stretched_grid[(row, col * 2)] = left;
+        stretched_grid[(row, col * 2 + 1)] = right;
+    }
+    println!("{}", grid_to_string(&stretched_grid));
+
+    (stretched_grid, moves)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_simple() -> miette::Result<()> {
+        let input = "#######
+#...#.#
+#.....#
+#..OO@#
+#..O..#
+#.....#
+#######
+
+<vv<<^^<<^^
+";
+        assert_eq!("618", process(input)?);
+        Ok(())
+    }
 
     #[test]
     fn test_process() -> miette::Result<()> {

@@ -12,6 +12,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 miette.workspace = true
 glam.workspace = true
+ndarray = { version = "0.16.1" }
 
 [dev-dependencies]
 divan.workspace = true
